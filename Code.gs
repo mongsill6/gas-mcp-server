@@ -17,10 +17,12 @@ function doPost(e) {
       return _json(401, { error: 'Unauthorized: invalid API key' });
     }
 
-    // Origin 체크
+    // Origin 체크 (참고: GAS 웹앱은 CORS 헤더에 직접 접근 불가.
+    // _origin은 클라이언트가 쿼리 파라미터로 명시적으로 보내야 함.
+    // 보안 수단으로는 제한적 — API Key가 주 인증 수단.)
     if (CONFIG.ALLOWED_ORIGINS.length > 0) {
       const origin = e.parameter._origin || '';
-      if (!CONFIG.ALLOWED_ORIGINS.includes(origin)) {
+      if (origin && !CONFIG.ALLOWED_ORIGINS.includes(origin)) {
         return _json(403, { error: 'Forbidden: origin not allowed' });
       }
     }
@@ -89,15 +91,19 @@ const ROUTES = {
 function sheetsRead(p) {
   _require(p, ['spreadsheetId', 'range']);
   const ss = SpreadsheetApp.openById(p.spreadsheetId);
-  const values = ss.getRange(p.range).getValues();
+  // range 형식: "Sheet1!A1:D10" 또는 "A1:D10" (기본 시트)
+  const sheet = _resolveSheet(ss, p.range);
+  const rangeRef = p.range.includes('!') ? p.range.split('!')[1] : p.range;
+  const values = sheet.getRange(rangeRef).getValues();
   return { values };
 }
 
 function sheetsWrite(p) {
   _require(p, ['spreadsheetId', 'range', 'values']);
   const ss = SpreadsheetApp.openById(p.spreadsheetId);
-  const range = ss.getRange(p.range);
-  range.setValues(p.values);
+  const sheet = _resolveSheet(ss, p.range);
+  const rangeRef = p.range.includes('!') ? p.range.split('!')[1] : p.range;
+  sheet.getRange(rangeRef).setValues(p.values);
   return { updatedRange: p.range, updatedRows: p.values.length };
 }
 
@@ -228,6 +234,19 @@ function calendarCreate(p) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Helpers
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/**
+ * range에서 시트명 파싱. "Sheet1!A1:D10" → Sheet1, "A1:D10" → 첫 번째 시트
+ */
+function _resolveSheet(ss, range) {
+  if (range.includes('!')) {
+    const sheetName = range.split('!')[0].replace(/'/g, '');
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) throw new Error(`Sheet "${sheetName}" not found`);
+    return sheet;
+  }
+  return ss.getSheets()[0];
+}
 
 function _require(params, keys) {
   for (const k of keys) {
